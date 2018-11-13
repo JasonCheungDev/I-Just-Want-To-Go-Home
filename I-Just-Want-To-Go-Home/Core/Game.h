@@ -1,9 +1,11 @@
 #pragma once
 
+#include <atomic>
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
 #include <set>
+#include <map>
 #include <memory>
 #include <SDL2\SDL.h>
 #include "../AssetLoader.h"
@@ -58,10 +60,17 @@ private:
 	// engine 
 	std::set<int> _deletionList;
 	std::vector<EntityAction> _additionList;
-	std::set<int> _additionVerification;	// used to ensure an entity isn't added twice
-	std::vector<std::unique_ptr<System>> _systems;
+	std::set<int> _additionVerification;							// used to ensure an entity isn't added twice
+	std::map<std::type_index, std::unique_ptr<System>> _systemList;	// map of all systems 
+	std::vector<System*> _systems;									// list of systems that must be run concurrently 
+	std::vector<System*> _concurrentSystems;						// list of systems that can be run asynchronously 
 	bool _initialized = false;
 	bool _running = false;
+	int frame = 0;
+	// concurrency 
+	std::atomic<int> _waitingForSystems = 0;						// number of systems this engine is waiting to finish
+	std::mutex _mtx; 
+	std::condition_variable _cv;
 
 // functions 
 public:
@@ -73,7 +82,7 @@ public:
 	
 	// Add a system to receive updates and enabled components. 
 	// Note: components update function will run regardless if the system is in the update list or not.
-	void addSystem(std::unique_ptr<System> system);
+	void addSystem(std::unique_ptr<System> system, bool synchronous = true);
 
 	// DEPRECATED
 	void addEntity(std::unique_ptr<Entity> entity);
@@ -105,6 +114,19 @@ public:
 	// Properly add an entity to a specified parent in the next frame.
 	// Note: you can directly add an entity with entity->addChild(e*) if you know what you're doing.
 	void addEntity(Entity* entity, int parent);
+
+	// Notify that a system has finished concurrent execution. 
+	void notifySystemFinish()
+	{
+		_waitingForSystems--;
+		// below might get called out of turn - but doesn't matter. just need to ensure all work is done.
+		// note: calling notify_one with no one waiting is well defined and does nothing (lol).
+		if (_waitingForSystems <= 0)
+		{
+			std::unique_lock<std::mutex> lck(_mtx);
+			_cv.notify_one();
+		}
+	}
 
 private: 
 

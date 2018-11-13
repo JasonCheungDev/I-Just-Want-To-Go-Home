@@ -63,7 +63,7 @@ int main(int argc, char* args[])
 	//Game::instance().addSystem(std::move(ss));
 
 	auto ps = std::make_unique<PhysicsSystem>();
-	Game::instance().addSystem(std::move(ps));
+	Game::instance().addSystem(std::move(ps), false);
 
 	// ===== INIT SCENE =====
 	Scene* scene = new Scene();

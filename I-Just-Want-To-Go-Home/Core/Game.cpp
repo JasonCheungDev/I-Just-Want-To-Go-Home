@@ -70,9 +70,30 @@ void Game::setActiveScene(Scene* scene)
 	scene->rootEntity->setEnabled(true);
 }
 
-void Game::addSystem(std::unique_ptr<System> system)
+void Game::addSystem(std::unique_ptr<System> system, bool synchronous)
 {
-	_systems.push_back(std::move(system));
+	auto sys_type = std::type_index(typeid(*system));
+
+	// check if system is already added 
+	if (_systemList.find(sys_type) != _systemList.end())
+	{
+		std::cerr << "ERROR: Readding an existing system to engine." << std::endl;
+		return;
+	}
+
+	// place in correct update list 
+	if (synchronous)
+	{
+		_systems.push_back(system.get());
+	}
+	else
+	{
+		_concurrentSystems.push_back(system.get());
+		system->startLooping();
+	}
+	
+	// keep track of system 
+	_systemList[sys_type] = std::move(system);
 }
 
 void Game::addEntity(Entity* entity)
@@ -94,12 +115,15 @@ void Game::loop()
 {
 	_running = true;
 
+	// ===== PERFORMANCE MEASUREMENTS =====
+	// This is only to measure CPU performance. For GPU use OpenGLProfiler.
+	std::chrono::high_resolution_clock::time_point startTime;
+	std::chrono::high_resolution_clock::time_point endTime;
+
+
 	while (_running)
 	{
-		// ===== PERFORMANCE MEASUREMENTS =====
-		// This is only to measure CPU performance. For GPU use OpenGLProfiler.
-		std::chrono::high_resolution_clock::time_point startTime;
-		std::chrono::high_resolution_clock::time_point endTime;
+		// std::cout << "FRAME: " << frame++ << std::endl;
 
 		startTime = std::chrono::high_resolution_clock::now();
 
@@ -111,11 +135,26 @@ void Game::loop()
 		updateEntity(activeScene->rootEntity.get(), 0.016f);
 
 		// 3. system update 
+		// concurrent systems 
+		_waitingForSystems = _concurrentSystems.size();
+		for (int i = 0; i < _concurrentSystems.size(); i++)
+		{
+			_concurrentSystems[i]->notifyUpdate(0.016f);
+		}
+		// synchronous systems
 		for (int i = 0; i < _systems.size(); i++)
 		{
 			_systems[i]->update(0.016f);
 			_systems[i]->clearComponents();	// cleanup for next iteration
 		}
+
+		// 4. wait for systems to update 
+		std::unique_lock<std::mutex> lck(_mtx);
+		while (_waitingForSystems > 0)
+		{
+			_cv.wait(lck);
+		}
+		lck.unlock();
 
 		endTime = std::chrono::high_resolution_clock::now();
 		auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
@@ -154,9 +193,10 @@ void Game::updateEntity(Entity * entity, float dt)
 		components[i]->update(dt);
 		// ... and notify systems
 		for (int j = 0; j < _systems.size(); j++)
-		{
 			_systems[j]->addComponent(type, components[i]);
-		}
+		for (int j = 0; j < _concurrentSystems.size(); j++)
+			_concurrentSystems[j]->addComponent(type, components[i]);
+
 	}
 }
 

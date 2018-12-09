@@ -26,6 +26,52 @@ public:
 	glm::vec3 position;
 	glm::vec3 rotation;
 	glm::vec3 scale = glm::vec3(1.0f);
+	
+	// EXPERIMENTAL (DISTANCE CULLING)
+	float activationRange = 60.0f;
+
+	// EXPERIMENTAL (THREAD ANNHILATION)
+	bool enableStatus = true;
+	bool worldTransPrepared = false;
+	bool EXP_configureTransform()
+	{
+		if (worldTransPrepared) return true;
+
+		auto parent = getParent();
+
+		if (parent == nullptr)
+		{
+			_worldTransformation = getLocalTransformation();
+			
+			worldTransPrepared = true;
+			enableStatus = _enabled;
+
+			return true;
+		}
+		else
+		{
+			// check if dependent entity is ready 
+			if (!parent->worldTransPrepared) 
+				return false;
+			else
+			{
+				if (parent->enableStatus)
+				{
+					_worldTransformation = parent->getWorldTransformation() * getLocalTransformation();
+					worldTransPrepared = true;
+					enableStatus = _enabled;
+					return true;
+				}
+				else
+				{
+					// parent was disabled. don't calculate but allow next entity to continue
+					worldTransPrepared = true;
+					enableStatus = false;
+					return true;
+				}
+			}
+		}
+	}
 
 private:
 	static unsigned int _curID;

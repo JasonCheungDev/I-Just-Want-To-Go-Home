@@ -11,6 +11,10 @@
 #include "..\EntitySystems\System.h"
 #include "Scene.h"
 #include "CpuProfiler.h"
+#include <atomic>
+#include <thread>
+#include <condition_variable>
+#include <mutex>
 
 //Screen dimension constants
 const int SCREEN_WIDTH = 1280;
@@ -47,6 +51,7 @@ private:
 public:
 	Scene* activeScene = nullptr;
 	AssetLoader loader;
+	Entity* player;
 
 	//// events 
 	//boost::signals2::signal<void(std::type_index, Component*)> componentCreated;
@@ -61,12 +66,15 @@ private:
 	std::set<int> _deletionList;
 	std::vector<EntityAction> _additionList;
 	std::set<int> _additionVerification;	// used to ensure an entity isn't added twice
+	std::vector<Entity*> _entities;			// used to ANNIHILATE.
+
 	std::vector<std::unique_ptr<System>> _systems;		// systems that are only updated once per frame
 	std::vector<std::unique_ptr<System>> _frameSystems;	// systems that can be updated multiple times per frame (fixed update).
 	const std::chrono::nanoseconds _frameTime = std::chrono::milliseconds( (long)(16.6666666666666666666) );
 	bool _initialized = false;
 	bool _running = false;
 	CpuProfiler _profiler;
+	int _cullCount = 0;
 
 // functions 
 public:
@@ -121,5 +129,56 @@ private:
 
 	// cleans up any remaining entities to be deleted or added
 	void resolveCleanup();
+
+	// splitting up is actually faster. this is b/c resolve can do a quick list check and stop early. 
+	void resolveAddDel(Entity* entity);
+
+	void yoloadd(Entity * e);
+
+	void resolveUpdates(Entity* entity, bool torf);
+
+	std::atomic<int> threadsWorking = 0;
+	std::mutex mtx;
+	std::condition_variable cv;
+	int threadCount = 4;
+
+	void superiorUpdate()
+	{
+		std::vector<std::thread> t;
+		t.reserve(threadCount);
+		threadsWorking = threadCount;
+
+		for (int i = 0; i < threadCount; i++)
+		{
+			// start thread to do junk
+			t.emplace_back(std::bind(&Game::annhilate, this, i));
+		}
+
+		// wait for all to finish
+		for (int i = 0; i < threadCount; i++)
+		{
+			t[i].join();
+		}
+
+		// manual update for now b/c input is not a system
+		auto c = player->getComponents();
+		for (auto& comp : c)
+		{
+			if (player->enableStatus && comp->getEnabled())
+				comp->update(0.016);
+		}
+
+		// reset for next frame
+		for (int i = 0; i < _entities.size(); i++)
+		{
+			_entities[i]->enableStatus = true;
+			_entities[i]->worldTransPrepared = false;
+		}
+
+
+		std::cout << "superior update finished" << std::endl;
+	}
+
+	void annhilate(int threadNum);
 };
 

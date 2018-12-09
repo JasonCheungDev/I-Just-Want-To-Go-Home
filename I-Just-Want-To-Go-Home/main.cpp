@@ -80,6 +80,7 @@ int main(int argc, char* args[])
 
 	// ===== INIT SCENE =====
 	Scene* scene = new Scene();
+	scene->rootEntity->setStatic(true);
 	Game::instance().setActiveScene(scene);
 
 	// ===== Test Sound =====
@@ -473,6 +474,7 @@ int main(int argc, char* args[])
 	// Game::instance().addEntity(eImage2);
 	Game::instance().addEntity(eSpeed);
 	Game::instance().addEntity(eTime);
+	Game::instance().player = playerEntity;
 
 	Game::instance().loop();
 

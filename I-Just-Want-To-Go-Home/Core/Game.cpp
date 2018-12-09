@@ -92,6 +92,9 @@ void Game::setActiveScene(Scene* scene)
 	// enable new scene 
 	activeScene = scene;
 	scene->rootEntity->setEnabled(true);
+	
+	_entities.clear();
+	_entities.push_back(scene->rootEntity.get());
 }
 
 void Game::addSystem(std::unique_ptr<System> system)
@@ -135,12 +138,22 @@ void Game::loop()
 		previous = current;
 		current = std::chrono::high_resolution_clock::now();
 
-		// 1. entity addition & deletion, and system component notification 
-		_profiler.StartTimer(1);
-		resolveEntities(activeScene->rootEntity.get(), true);
+		_profiler.StartTimer(0);
+		resolveAddDel(activeScene->rootEntity.get());
 		resolveCleanup();
-		_profiler.StopTimer(1);
+		_profiler.StopTimer(0);
 
+		// 1. entity addition & deletion, and system component notification 
+		/*
+		_profiler.StartTimer(1);
+		_cullCount = 0;
+		resolveUpdates(activeScene->rootEntity.get(), false);
+		std::cout << _cullCount << std::endl;
+		_profiler.StopTimer(1);
+		*/
+		_profiler.StartTimer(1);
+		superiorUpdate();
+		_profiler.StopTimer(1);
 
 		_profiler.StartTimer(2);
 		auto frameDelta = std::chrono::duration_cast<std::chrono::nanoseconds>(current - previous);
@@ -151,7 +164,7 @@ void Game::loop()
 			timeSinceLastUpdate -= _frameTime;
 			// 2. entity update 
 			std::chrono::duration<double> dt = (_frameTime);
-			updateEntity(activeScene->rootEntity.get(), dt.count());
+			// updateEntity(activeScene->rootEntity.get(), dt.count());
 
 			// 3. fixed system update 
 			for (int i = 0; i < _systems.size(); i++)
@@ -182,6 +195,70 @@ void Game::stop()
 	_running = false;
 }
 
+std::mutex sysMtx;
+
+void Game::annhilate(int threadNum)
+{
+	bool finished = false;
+
+	int range = _entities.size() / threadCount;
+	int start = threadNum * range;
+	int end = (start + range > _entities.size()) ? _entities.size() : start + range;
+
+	if (range < 1) return;
+
+	// transformation / enable status finished. spin-locking but synchronoous
+	while (!finished)
+	{
+		// std::cout << "thread " << threadNum << " working" << std::endl;
+		finished = true;
+		for (int i = start; i < end; i++)
+		{
+			bool success = _entities[i]->EXP_configureTransform();
+			if (!success) finished = false;
+		}
+	}
+
+	// notify and update
+	for (int e = start; e < end; e++)
+	{
+		if (_entities[e]->enableStatus)
+		{
+			auto components = _entities[e]->getComponents();
+			for (int c = 0; c < components.size(); c++)
+			{
+				// ... ensure it is enabled ...
+				if (!components[c]->getEnabled()) continue;
+				components[c]->update(0.016);
+			}
+
+			for (int c = 0; c < components.size(); c++)
+			{
+				// ... ensure it is enabled ...
+				if (!components[c]->getEnabled()) continue;
+				auto foo = components[c];
+
+				// ... and notify systems
+				sysMtx.lock();
+				auto type = std::type_index(typeid(*components[c]));
+				for (int j = 0; j < _systems.size(); j++)
+				{
+					auto sys = _systems[j].get();
+					sys->addComponent(type, foo);
+				}
+				// _systems[j]->addComponent(type, components[c]);
+				for (int j = 0; j < _frameSystems.size(); j++)
+				{
+					auto yolo = _frameSystems[j].get();
+					yolo->addComponent(type, foo);
+				}
+				sysMtx.unlock();
+				// _frameSystems[j]->addComponent(type, components[c]);
+			}
+		}
+	}
+}
+
 // will update all components in an entity, children in entity, and notify systems
 void Game::updateEntity(Entity * entity, float dt)
 {
@@ -206,6 +283,8 @@ void Game::updateEntity(Entity * entity, float dt)
 		components[i]->update(dt);
 	}
 }
+
+
 
 void Game::resolveEntities(Entity * entity, bool parentEnabled)
 {
@@ -293,3 +372,222 @@ void Game::resolveCleanup()
 	_additionList.clear();
 	_additionVerification.clear();
 }
+
+void Game::resolveAddDel(Entity * entity)
+{
+	if (_deletionList.size() == 0 && _additionList.size() == 0) return;
+
+	int id = entity->getID();
+
+	// check if branch should be deleted
+	if (_deletionList.size() > 0)
+	{
+		auto toDelete = _deletionList.find(id);
+		if (toDelete != _deletionList.end())
+		{
+			entity->release();
+			_deletionList.erase(toDelete);
+			return;
+		}
+	}
+
+	// check if something should be added 
+	if (_additionList.size() > 0)
+	{
+		bool updateList = false;
+
+		for (auto& entry : _additionList)
+		{
+			if (entry.target == id)
+			{
+				yoloadd(entry.entity);
+
+				std::cout << "Adding entity " << entry.entity->getID() << " to parent entity " << id << std::endl;
+				entity->addChild(entry.entity);
+				updateList = true;
+
+			}
+		}
+
+		if (updateList)
+		{
+			_additionList.erase(
+				std::remove_if(_additionList.begin(), _additionList.end(), [id](const EntityAction& e) { return e.target == id; }),
+				_additionList.end());
+		}
+	}
+
+	// go thru remaining children 
+	auto children = entity->getChildren();
+	for (int i = 0; i < children.size(); i++)
+	{
+		resolveAddDel(children[i]);
+	}
+}
+
+void Game::yoloadd(Entity* e)
+{
+	_entities.push_back(e);
+	auto children = e->getChildren();
+	for (auto& child : children)
+	{
+		yoloadd(child);
+	}
+}
+
+void Game::resolveUpdates(Entity * entity, bool torf)
+{
+	int id = entity->getID();
+
+	// quick enable cull check
+	if (!entity->getEnabled())
+	{
+		_cullCount++;
+		return;
+	}
+	// precalculate world transformation matrix 
+	if (!entity->getStatic())
+		entity->configureTransform();
+
+	// quick distance cull check
+	if (entity != activeScene->rootEntity.get())
+	{
+	/*	if (glm::distance2(entity->getWorldPosition(), player->getWorldPosition()) > entity->activationRange * entity->activationRange)
+		{
+			_cullCount++;
+			return;
+		}*/
+	}
+
+	// for all components notify systems 
+	auto components = entity->getComponents();
+	for (int i = 0; i < components.size(); i++)
+	{
+		// ... ensure it is enabled ...
+		if (!components[i]->getEnabled()) continue;
+		// ... and notify systems
+		auto type = std::type_index(typeid(*components[i]));
+		for (int j = 0; j < _systems.size(); j++)
+			_systems[j]->addComponent(type, components[i]);
+		for (int j = 0; j < _frameSystems.size(); j++)
+			_frameSystems[j]->addComponent(type, components[i]);
+	}
+
+	// go thru remaining children 
+	auto children = entity->getChildren();
+	for (int i = 0; i < children.size(); i++)
+	{
+		resolveUpdates(children[i], false);
+	}
+}
+
+/*
+
+
+// will update all components in an entity, children in entity, and notify systems
+void Game::updateEntity(Entity * entity, float dt)
+{
+	// stop if disabled
+	if (!entity->getEnabled()) return;
+
+	// go thru all children first (remember structure incase of move)
+	auto children = entity->getChildren();
+	for (int i = 0; i < children.size(); i++)
+	{
+		updateEntity(children[i], dt);
+	}
+
+	// for all components ...
+	auto components = entity->getComponents();
+	for (int i = 0; i < components.size(); i++)
+	{
+		// ... ensure it is enabled ...
+		if (!components[i]->getEnabled()) continue;
+		// ... update it ...
+		auto type = std::type_index(typeid(*components[i]));
+		components[i]->update(dt);
+	}
+}
+
+
+
+void Game::resolveEntities(Entity * entity, bool parentEnabled)
+{
+	int id = entity->getID();
+
+	// check if branch should be deleted
+	if (_deletionList.size() > 0)
+	{
+		auto toDelete = _deletionList.find(id);
+		if (toDelete != _deletionList.end())
+		{
+			entity->release();
+			_deletionList.erase(toDelete);
+			return;
+		}
+	}
+
+	// check if something should be added
+	if (_additionList.size() > 0)
+	{
+		bool updateList = false;
+
+		for (auto& entry : _additionList)
+		{
+			if (entry.target == id)
+			{
+				std::cout << "Adding entity " << entry.entity->getID() << " to parent entity " << id << std::endl;
+				entity->addChild(entry.entity);
+				updateList = true;
+			}
+		}
+
+		if (updateList)
+		{
+			_additionList.erase(
+				std::remove_if(_additionList.begin(), _additionList.end(), [id](const EntityAction& e) { return e.target == id; }),
+				_additionList.end());
+		}
+	}
+
+	if (entity != activeScene->rootEntity.get())
+	{
+		// quick distance cull check
+		if (glm::distance2(entity->getWorldPosition(), player->getWorldPosition()) > entity->activationRange * entity->activationRange)
+		{
+			_cullCount++;
+			return;
+		}
+	}
+
+
+	if (parentEnabled)
+	{
+		// precalculate world transformation matrix
+		if (entity->getEnabled() && !entity->getStatic())
+			entity->configureTransform();
+
+		// for all components notify systems
+		auto components = entity->getComponents();
+		for (int i = 0; i < components.size(); i++)
+		{
+			// ... ensure it is enabled ...
+			if (!components[i]->getEnabled()) continue;
+			// ... and notify systems
+			auto type = std::type_index(typeid(*components[i]));
+			for (int j = 0; j < _systems.size(); j++)
+				_systems[j]->addComponent(type, components[i]);
+			for (int j = 0; j < _frameSystems.size(); j++)
+				_frameSystems[j]->addComponent(type, components[i]);
+		}
+	}
+
+	// go thru remaining children
+	auto children = entity->getChildren();
+	for (int i = 0; i < children.size(); i++)
+	{
+		resolveEntities(children[i], parentEnabled && entity->getEnabled());
+	}
+}
+
+*/

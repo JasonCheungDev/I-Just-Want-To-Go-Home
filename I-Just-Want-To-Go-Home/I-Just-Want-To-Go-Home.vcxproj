@@ -145,6 +145,8 @@ xcopy "$(ProjectDir)fonts" "$(TargetDir)fonts" /s /i /e /y
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AssetLoader.cpp" />
+    <ClCompile Include="CircularBuffer.cpp" />
+    <ClCompile Include="CollisionTask.cpp" />
     <ClCompile Include="Core\Game.cpp" />
     <ClCompile Include="Core\CpuProfiler.cpp" />
     <ClCompile Include="EntitySystems\DestructionComponent.cpp" />
@@ -193,6 +195,9 @@ xcopy "$(ProjectDir)fonts" "$(TargetDir)fonts" /s /i /e /y
     <ClCompile Include="Rendering\UI\TextComponent.cpp" />
     <ClCompile Include="Rendering\UI\View.cpp" />
     <ClCompile Include="Game\TimeDisplayComponent.cpp" />
+    <ClCompile Include="EntitySystems\Transform.cpp" />
+    <ClCompile Include="Task.cpp" />
+    <ClCompile Include="TaskScheduler.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="libs\json\json_valueiterator.inl" />
@@ -201,6 +206,8 @@ xcopy "$(ProjectDir)fonts" "$(TargetDir)fonts" /s /i /e /y
   <ItemGroup>
     <ClInclude Include="AssetLoader.h" />
     <ClInclude Include="Camera.h" />
+    <ClInclude Include="CircularBuffer.h" />
+    <ClInclude Include="CollisionTask.h" />
     <ClInclude Include="Core\Game.h" />
     <ClInclude Include="Core\ThreadType.h" />
     <ClInclude Include="Core\CpuProfiler.h" />
@@ -254,12 +261,13 @@ xcopy "$(ProjectDir)fonts" "$(TargetDir)fonts" /s /i /e /y
     <ClInclude Include="Rendering\UI\TextComponent.h" />
     <ClInclude Include="Rendering\UI\View.h" />
     <ClInclude Include="Game\TimeDisplayComponent.h" />
+    <ClInclude Include="EntitySystems\Transform.h" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="EntitySystems\Component.h" />
     <ClInclude Include="EntitySystems\Entity.h" />
     <ClInclude Include="EntitySystems\System.h" />
-    <ClInclude Include="EntitySystems\Transform.h" />
+    <ClInclude Include="EntitySystems\TransformComponent.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="Rendering\DOCUMENTATION.txt" />
@@ -269,6 +277,8 @@ xcopy "$(ProjectDir)fonts" "$(TargetDir)fonts" /s /i /e /y
     <ClInclude Include="Game\SpeedDisplayComponent.h" />
     <ClInclude Include="Sound\SoundComponent.h" />
     <ClInclude Include="Sound\SoundSystem.h" />
+    <ClInclude Include="Task.h" />
+    <ClInclude Include="TaskScheduler.h" />
     <ClInclude Include="TestableClass.h" />
   </ItemGroup>
   <ItemGroup>

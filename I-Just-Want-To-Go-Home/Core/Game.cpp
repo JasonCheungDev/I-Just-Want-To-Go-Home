@@ -18,10 +18,13 @@ void Game::initialize()
 	//	2: fixed update cycle
 	//	3: frame update cycle
 	//	4: SDL initialization 
-	_profiler.InitializeTimers(5);
+	_profiler.InitializeTimers(6);
 	_profiler.LogOutput("Engine.log");	// optional
-	_profiler.PrintOutput(true);		// optional
-	_profiler.FormatMilliseconds(true);	// optional
+	// _profiler.PrintOutput(true);		// optional
+	// _profiler.FormatMilliseconds(true);	// optional
+
+	_frameProfiler.InitializeTimers(2);
+	_frameProfiler.LogOutput("FrameEngine.log");
 
 	_profiler.StartTimer(4);
 
@@ -120,7 +123,7 @@ void Game::addEntity(Entity* entity)
 void Game::loop(ThreadType type)
 {
 	_running[type] = true;
-
+	/*
 	// background thread 
 	std::thread primaryThread(&Game::primary_loop, this);
 	// current thread (for SDL context)
@@ -128,6 +131,9 @@ void Game::loop(ThreadType type)
 
 	// ensure both threads are dead 
 	primaryThread.join();
+	*/
+
+	sequential_loop();
 }
 
 void Game::stop(ThreadType type)
@@ -154,6 +160,9 @@ void Game::ui_loop()
 
 	while (_running[ThreadType::graphics])
 	{
+		_frameProfiler.StartTimer(0);
+
+
 		frame++;
 		previous = current;
 		current = std::chrono::high_resolution_clock::now();
@@ -181,6 +190,10 @@ void Game::ui_loop()
 
 		_entitiesMtx.unlock();
 
+
+		_frameProfiler.StopTimer(0);
+		_frameProfiler.FrameFinish();
+
 		// SDL actions should only happen in the graphics thread
 		SDL_GL_SwapWindow(_window);
 	}
@@ -198,20 +211,36 @@ void Game::primary_loop()
 
 	int frame = 0;
 
+	auto lastUpdate = std::chrono::high_resolution_clock::now();
+	auto cur = std::chrono::high_resolution_clock::now();
+	auto updateLength = 4;	// milliseconds
+	auto amt = std::chrono::milliseconds(20);
+
 	while (_running[ThreadType::primary])
 	{
 		frame++;
+
+		// OLD STUFF
 		previous = current;
 		current = std::chrono::high_resolution_clock::now();
-
+		
 		auto frameDelta = std::chrono::duration_cast<std::chrono::nanoseconds>(current - previous);
 		timeSinceLastUpdate += frameDelta;
+		// END OLD STUFF
 
-		while (timeSinceLastUpdate > _frameTime)
+		std::cout << frame << std::endl;
+	
+		// while (timeSinceLastUpdate < _frameTime)
+		while (lastUpdate < current)
 		{
-			timeSinceLastUpdate -= _frameTime;
-			std::chrono::duration<double> dt = (_frameTime);
-			
+			_profiler.StartTimer(0);
+
+			lastUpdate += amt;
+
+			// timeSinceLastUpdate -= _frameTime;
+			// std::chrono::duration<double> dt = (_frameTime);
+			std::chrono::duration<double> dt = amt;
+
 			// check for entity addition/deletion 
 			if (_additionList.size() > 0 || _deletionList.size() > 0)
 			{
@@ -222,24 +251,97 @@ void Game::primary_loop()
 			}
 
 			// precompute transforms 
+			_profiler.StartTimer(5);
 			_precomputeMtx.lock();
+			_profiler.StopTimer(5);	// measure how long we're waiting
+
+			_profiler.StartTimer(1);
 			resolvePrecompute(activeScene->rootEntity.get());
+			_profiler.StopTimer(1);
 			_precomputeMtx.unlock();
 			
 			// system notification 
+			_profiler.StartTimer(2);
 			resolveSystemNotification(activeScene->rootEntity.get(), ThreadType::primary);
+			_profiler.StopTimer(2);
 
 			// entity update 
+			_profiler.StartTimer(3);
 			updateEntity(activeScene->rootEntity.get(), dt.count());
+			_profiler.StopTimer(3);
 
 			// system update 
+			_profiler.StartTimer(4);
 			for (int i = 0; i < _systems[ThreadType::primary].size(); i++)
 			{
 				_systems[ThreadType::primary][i]->update(dt.count());
 				_systems[ThreadType::primary][i]->clearComponents();
 			}
+			_profiler.StopTimer(4);
+
+
+			_profiler.StopTimer(0);
+
+			_profiler.FrameFinish();
 		}
 	}
+}
+
+void Game::sequential_loop()
+{
+	auto amt = std::chrono::milliseconds(16);
+	std::chrono::duration<double> dt = amt;
+
+	while (true)
+	{
+		_profiler.StartTimer(0);
+
+		// check for entity addition/deletion 
+		if (_additionList.size() > 0 || _deletionList.size() > 0)
+		{
+			resolveAdditionDeletion(activeScene->rootEntity.get());
+			resolveCleanup();
+		}
+
+
+		// precompute transforms 
+		_profiler.StartTimer(1);
+		resolvePrecompute(activeScene->rootEntity.get());
+		resolvePrecomputeFreeze(activeScene->rootEntity.get());
+		_profiler.StopTimer(1);
+
+		// system notification 
+		_profiler.StartTimer(2);
+		resolveSystemNotification(activeScene->rootEntity.get(), ThreadType::primary);
+		resolveSystemNotification(activeScene->rootEntity.get(), ThreadType::graphics);
+		_profiler.StopTimer(2);
+
+		// entity update 
+		_profiler.StartTimer(3);
+		updateEntity(activeScene->rootEntity.get(), dt.count());
+		_profiler.StopTimer(3);
+
+		// system update 
+		_profiler.StartTimer(4);
+		for (int i = 0; i < _systems[ThreadType::primary].size(); i++)
+		{
+			_systems[ThreadType::primary][i]->update(dt.count());
+			_systems[ThreadType::primary][i]->clearComponents();
+		}
+		for (int i = 0; i < _frameSystems[ThreadType::graphics].size(); i++)
+		{
+			_frameSystems[ThreadType::graphics][i]->update(dt.count());
+			_frameSystems[ThreadType::graphics][i]->clearComponents();	// cleanup for next iteration
+		}
+		_profiler.StopTimer(4);
+
+		_profiler.StopTimer(0);
+		_profiler.FrameFinish();
+
+		// SDL actions should only happen in the graphics thread
+		SDL_GL_SwapWindow(_window);
+	}
+	
 }
 
 // will update all components in an entity, children in entity, and notify systems

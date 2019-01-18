@@ -72,10 +72,11 @@ private:
 	std::set<int> _additionVerification;	// used to ensure an entity isn't added twice
 	std::vector<std::unique_ptr<System>> _systems[THREAD_TYPES];		// systems that are only updated once per frame
 	std::vector<std::unique_ptr<System>> _frameSystems[THREAD_TYPES];	// systems that can be updated multiple times per frame (fixed update).
-	const std::chrono::nanoseconds _frameTime = std::chrono::milliseconds( (long)(16.6666666666666666666) );
+	const std::chrono::nanoseconds _frameTime = std::chrono::milliseconds( (long)(10) );
 	bool _initialized = false;
 	bool _running[THREAD_TYPES];
 	CpuProfiler _profiler;
+	CpuProfiler _frameProfiler;
 	
 	// multi-threading control 
 	std::mutex _entitiesMtx;
@@ -138,6 +139,8 @@ public:
 	void ui_loop();
 
 	void primary_loop();
+
+	void sequential_loop();
 
 private: 
 

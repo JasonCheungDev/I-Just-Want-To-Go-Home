@@ -1,5 +1,4 @@
 #include "Entity.h"
-
 #include "../Core/Game.h"
 
 unsigned int Entity::_curID = 0;
@@ -159,6 +158,8 @@ glm::vec3 Entity::getWorldScale()
 		ret += e->scale;
 		e = getParent();
 	}
+
+	
 	return ret;
 }
 

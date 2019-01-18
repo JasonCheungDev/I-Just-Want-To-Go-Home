@@ -1,76 +1,35 @@
-#include <algorithm>
-#include <string>
-#include "PhysicsSystem.h"
-#include "../CollisionTask.h"
-#include "../TaskScheduler.h"
+#pragma once
 
-using namespace std;
+#include <map>
+#include <memory>
+#include "Physics/Collider2D.h"
+#include "Physics/Collision.h"
+#include "Physics/PhysicsComponent.h"
+#include "Task.h"
 
-PhysicsSystem::PhysicsSystem() : System()
+class CollisionTask : public Task
 {
-}
-
-// registers the collider to physics system
-// and returns its collider id
-int PhysicsSystem::RegisterCollider(shared_ptr<Collider2D> collider)
-{
-	int index = static_cast<int>(this->_colliders.size());
-	this->_colliders.insert(pair<int, shared_ptr<Collider2D>>(index, collider));
-	collider->colliderId = index;
-	return index;
-}
-
-int PhysicsSystem::RegisterEntity(Entity* entity)
-{
-	int index = entity->getID();
-	this->_entities.insert(pair<int, Entity*>(index, entity));
-	return index;
-}
-
-int yolo = 0;
-
-// should be called every update frame
-void PhysicsSystem::update(float dt)
-{
-	if (yolo < 100)
+public:
+	CollisionTask(std::map<int, shared_ptr<Collider2D>>& cols, int index) 
+		: _colliders(cols), index(index)
 	{
-		++yolo;
-		return;
+		_colliders = cols;
+		std::cout << "Created CollisionTask with size " << cols.size() << std::endl;
 	}
-
-	for (auto i = _entities.begin(); i != _entities.end(); ++i) {
-		this->physicsUpdate(i->second, dt);
-	}
-
-	DeployCollisionTask();
-
-	//this->CheckCollisions();
-}
-
-
-void PhysicsSystem::DeployCollisionTask()
-{
-	this->_justChecked.clear(); // ? 
-
-	for (int from = 0; from < this->_colliders.size(); ++from)
+	~CollisionTask() {};
+	
+	void Execute() override
 	{
-		CollisionTask* task = new CollisionTask(_colliders, from);
-		//task->Execute();
-		TaskScheduler::instance().ScheduleTask(task);
-	}
-}
+		map<string, Collision*> collisions = {};
+		const float NEAR_THRESHOLD = 0.02f;
 
-void PhysicsSystem::CheckCollisions()
-{
-	map<string, Collision*> collisions = {};
-	const float NEAR_THRESHOLD = 0.02f;
+		int from = index;
 
-	this->_justChecked.clear();
-	for (int from = 0; from < this->_colliders.size(); ++from)
-	{
-		if (this->_colliders[from]->GetEntity()->getStatic())
-			continue;
-		
+		// static colliders do not collider with another
+		std::cout << "Accessing collider id: " << from << std::endl;
+		//if (this->_colliders[from]->GetEntity()->getStatic())
+		//	return;
+
 		for (int to = 0; to < this->_colliders.size(); ++to)
 		{
 			// if self
@@ -126,7 +85,7 @@ void PhysicsSystem::CheckCollisions()
 					if (tep < toPoints.size() - 1)
 						pointD = toPoints[tep + 1];
 					pointD = pointD.Rotate(toRotation) + toOrigin;
-					
+
 					//cout << tep << "t. " << toRotation << " (" << pointC.x << ", " << pointC.y << ")\n" << endl;
 
 					if (pointA.Near(pointC) || pointA.Near(pointD) || pointB.Near(pointC) || pointB.Near(pointD))
@@ -314,176 +273,115 @@ void PhysicsSystem::CheckCollisions()
 				// no collision
 				this->RemoveCollision(fromCollider, toCollider);
 			}
+
+			for (auto i = collisions.begin(); i != collisions.end(); i++) {
+				ResolveCollision(i->second);
+			}
 		}
 	}
-	for (auto i = collisions.begin(); i != collisions.end(); i++) {
-		ResolveCollision(i->second);
-	}
-}
 
-void PhysicsSystem::RemoveCollision(shared_ptr<Collider2D> colliderA, shared_ptr<Collider2D> colliderB)
-{
-	// if already colliding
-	// todo: add OnExitCollision?
-	vector<int>::iterator it;
+	void ResolveCollision(Collision* c) {
+		std::cout << "ResolvingCollisions" << std::endl;
+		auto e1 = c->entities.first;
+		auto e2 = c->entities.second;
+		auto pc1 = e1->getComponent<PhysicsComponent>();
+		auto pc2 = e2->getComponent<PhysicsComponent>();
+		if (pc1->isStatic && pc2->isStatic || !pc1->hasPhysicsCollision || !pc2->hasPhysicsCollision) {
+			// Either both are static in which there's no reason to calculate anything
+			// Or one of them doesn't have physics collisions, which means nothing happens to either
+			return;
+		}
+		float im1 = 1 / pc1->mass;
+		float im2 = 1 / pc2->mass;
+		if (pc1->isStatic) {
+			im1 = 0;
+		}
+		if (pc2->isStatic) {
+			im2 = 0;
+		}
 
-	it = find(colliderA->collidingIds.begin(), colliderA->collidingIds.end(), colliderB->colliderId);
-	if (it != colliderA->collidingIds.end())
-	{
-		int index = static_cast<int>(distance(colliderA->collidingIds.begin(), it));
-		colliderA->collidingIds.erase(colliderA->collidingIds.begin() + index);
-	}
+		for (int i = 0; i < c->colliders.size(); i++) {
 
-	it = find(colliderB->collidingIds.begin(), colliderB->collidingIds.end(), colliderA->colliderId);
-	if (it != colliderB->collidingIds.end())
-	{
-		int index = static_cast<int>(distance(colliderB->collidingIds.begin(), it));
-		colliderB->collidingIds.erase(colliderB->collidingIds.begin() + index);
-	}
-}
+			Point center1 = c->colliders[i].first->GetCenter();
+			Point center2 = c->colliders[i].second->GetCenter();
+			PhysicsVector dist = PhysicsVector(center2.x - center1.x, center2.y - center1.y);
+			PhysicsVector n = dist.unit();
 
-void PhysicsSystem::physicsUpdate(Entity* e, float delta) {
-	const float gravity = 9.8; // Acceleration from gravity; for purpose of calculating friction
-	auto pc = e->getComponent<PhysicsComponent>();
-	float im = 1 / pc->mass;
-	
-	PhysicsVector f = pc->force;
-	float af = pc->angularForce;
-	PhysicsVector v = pc->velocity;
-	float av = pc->angularVelocity;
+			vector<Point>* collPoints = c->getCollisionPoints(i);
 
-	if (v.length() > 0) {
-		float drag = -v.dot(v) * pc->mass * pc->getDrag();
-		float fric = -pc->mass * gravity * pc->getFriction();
-		f += (drag + fric) * v.unit(); // fric is already negative so we don't need to worry about sign
-	}
+			PhysicsVector relVel = (pc2->velocity - pc1->velocity);
 
-	if (av != 0) {
-		float adrag = -av * av * pc->mass * pc->getRotationDrag();
-		float fric = -pc->mass * gravity * pc->getRotationFriction();
-		af += (adrag + fric) * (av > 0 ? 1 : -1);
-	}
-
-	PhysicsVector a = f * im;
-	float aa = af * im;
-
-	PhysicsVector pos = PhysicsVector(e->position.x, e->position.z);
-	pos += v * delta + 0.5 * a * delta * delta;// use the curPos variable to move the entity
-	v += a * delta;
-
-	float rot = e->rotation.y;
-	rot += av * delta + 0.5 * aa * delta * delta;
-	av += aa * delta;
-
-	if (av < 0.05 && av > -0.05) {
-		av = 0.0f;
-	}
-
-	if (pc->velocity.x < 0.05 && pc->velocity.x > -0.05) {
-		pc->velocity.x = 0.0f;
-	}
-
-	if (pc->velocity.y < 0.05 && pc->velocity.y > -0.05) {
-		pc->velocity.y = 0.0f;
-	}
-
-	pc->velocity.x = v.x;
-	pc->velocity.y = v.y;
-	pc->angularVelocity = av;
-
-	e->position = glm::vec3(pos.x, e->position.y, pos.y);
-	e->rotation = glm::vec3(e->rotation.x, rot, e->rotation.z);
-}
-
-
-
-void PhysicsSystem::ResolveCollision(Collision* c) {
-	auto e1 = c->entities.first;
-	auto e2 = c->entities.second;
-	auto pc1 = e1->getComponent<PhysicsComponent>();
-	auto pc2 = e2->getComponent<PhysicsComponent>();
-	if (pc1->isStatic && pc2->isStatic || !pc1->hasPhysicsCollision || !pc2->hasPhysicsCollision) {
-		// Either both are static in which there's no reason to calculate anything
-		// Or one of them doesn't have physics collisions, which means nothing happens to either
-		return;
-	}
-	float im1 = 1 / pc1->mass;
-	float im2 = 1 / pc2->mass;
-	if (pc1->isStatic) {
-		im1 = 0;
-	}
-	if (pc2->isStatic) {
-		im2 = 0;
-	}
-
-	for (int i = 0; i < c->colliders.size(); i++) {
-
-		Point center1 = c->colliders[i].first->GetCenter();
-		Point center2 = c->colliders[i].second->GetCenter();
-		PhysicsVector dist = PhysicsVector(center2.x - center1.x, center2.y - center1.y);
-		PhysicsVector n = dist.unit();
-
-		vector<Point>* collPoints = c->getCollisionPoints(i);
-
-		PhysicsVector relVel = (pc2->velocity - pc1->velocity);
-
-		if (collPoints->size() >= 2) {
-			// Only consider the first two points
-			// The normal should be perpandicular to the collision points
-			Point startPt = (*collPoints)[0];
-			Point endPt = (*collPoints)[1];
-			PhysicsVector normUnnormalized = PhysicsVector(endPt.y - startPt.y, startPt.x - endPt.x);
-			PhysicsVector tmp = normUnnormalized.unit();
-			if (normUnnormalized.dot(relVel) < 0) {
-				// If the normal is already facing away from the center, just use it
-				n = tmp;
+			if (collPoints->size() >= 2) {
+				// Only consider the first two points
+				// The normal should be perpandicular to the collision points
+				Point startPt = (*collPoints)[0];
+				Point endPt = (*collPoints)[1];
+				PhysicsVector normUnnormalized = PhysicsVector(endPt.y - startPt.y, startPt.x - endPt.x);
+				PhysicsVector tmp = normUnnormalized.unit();
+				if (normUnnormalized.dot(relVel) < 0) {
+					// If the normal is already facing away from the center, just use it
+					n = tmp;
+				}
+				else {
+					// Otherwise use the opposite
+					n = -tmp;
+				}
+				cout << tmp.x << ", " << tmp.y << endl;
 			}
 			else {
-				// Otherwise use the opposite
-				n = -tmp;
+				//if (relVel.dot(n) > 0) {
+					//continue;
+				//}
 			}
-			cout << tmp.x << ", " << tmp.y << endl;
-		}
-		else {
-			//if (relVel.dot(n) > 0) {
-				//continue;
-			//}
-		}
 
-		float vNorm = relVel.dot(n);
-		if (vNorm > 0) {
-			continue;
-		}
+			float vNorm = relVel.dot(n);
+			if (vNorm > 0) {
+				continue;
+			}
 
-		// Better positional correction
-		const float velRatio = 0.002;
-		const float minRatio = 0.07;
-		PhysicsVector corr1 = -n * (minRatio + velRatio * pc1->velocity.length()) * im1;
-		PhysicsVector corr2 = n * (minRatio + velRatio * pc1->velocity.length()) * im2;
-		e1->position = glm::vec3(e1->position.x + corr1.x, e1->position.y, e1->position.z + corr1.y);
-		e2->position = glm::vec3(e2->position.x + corr2.x, e2->position.y, e2->position.z + corr2.y);
+			// Better positional correction
+			const float velRatio = 0.002;
+			const float minRatio = 0.07;
+			PhysicsVector corr1 = -n * (minRatio + velRatio * pc1->velocity.length()) * im1;
+			PhysicsVector corr2 = n * (minRatio + velRatio * pc1->velocity.length()) * im2;
+			e1->position = glm::vec3(e1->position.x + corr1.x, e1->position.y, e1->position.z + corr1.y);
+			e2->position = glm::vec3(e2->position.x + corr2.x, e2->position.y, e2->position.z + corr2.y);
 
-		float e = pc1->elasticity < pc2->elasticity ? pc1->elasticity : pc2->elasticity;
-		float j = -(1 + e) * vNorm / (im1 + im2);
-		PhysicsVector impulse = j * n;
-		pc1->velocity -= impulse * im1;
-		pc2->velocity += impulse * im2;
+			float e = pc1->elasticity < pc2->elasticity ? pc1->elasticity : pc2->elasticity;
+			float j = -(1 + e) * vNorm / (im1 + im2);
+			PhysicsVector impulse = j * n;
+			pc1->velocity -= impulse * im1;
+			pc2->velocity += impulse * im2;
 
-		delete collPoints;
-	}
-}
-
-void PhysicsSystem::addComponent(std::type_index t, Component* component) {
-	if (t == std::type_index(typeid(PhysicsComponent))) {
-		PhysicsComponent* pc = static_cast<PhysicsComponent*>(component);
-		RegisterEntity(pc->getEntity());
-		for (auto c : pc->colliders) {
-			RegisterCollider(c);
+			delete collPoints;
 		}
 	}
-}
 
-void PhysicsSystem::clearComponents() {
-	_colliders.clear();
-	_entities.clear();
-}
+	void RemoveCollision(shared_ptr<Collider2D> colliderA, shared_ptr<Collider2D> colliderB)
+	{
+		std::cout << "RemovingCollisions" << std::endl;
+		// if already colliding
+		// todo: add OnExitCollision?
+		vector<int>::iterator it;
+
+		it = find(colliderA->collidingIds.begin(), colliderA->collidingIds.end(), colliderB->colliderId);
+		if (it != colliderA->collidingIds.end())
+		{
+			int index = static_cast<int>(distance(colliderA->collidingIds.begin(), it));
+			colliderA->collidingIds.erase(colliderA->collidingIds.begin() + index);
+		}
+
+		it = find(colliderB->collidingIds.begin(), colliderB->collidingIds.end(), colliderA->colliderId);
+		if (it != colliderB->collidingIds.end())
+		{
+			int index = static_cast<int>(distance(colliderB->collidingIds.begin(), it));
+			colliderB->collidingIds.erase(colliderB->collidingIds.begin() + index);
+		}
+	}
+
+private:
+	std::map<int, shared_ptr<Collider2D>>& _colliders;
+	std::vector<std::string> _justChecked;
+	int index; 
+};
+

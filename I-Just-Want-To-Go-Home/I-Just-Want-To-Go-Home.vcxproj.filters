@@ -50,6 +50,11 @@
     <ClCompile Include="Sound\SoundSystem.cpp" />
     <ClCompile Include="Physics\Collision.cpp" />
     <ClCompile Include="EntitySystems\InputSystem.cpp" />
+    <ClCompile Include="EntitySystems\Transform.cpp" />
+    <ClCompile Include="TaskScheduler.cpp" />
+    <ClCompile Include="CircularBuffer.cpp" />
+    <ClCompile Include="Task.cpp" />
+    <ClCompile Include="CollisionTask.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AssetLoader.h" />
@@ -73,7 +78,6 @@
     <ClInclude Include="EntitySystems\Component.h" />
     <ClInclude Include="EntitySystems\Entity.h" />
     <ClInclude Include="EntitySystems\System.h" />
-    <ClInclude Include="EntitySystems\Transform.h" />
     <ClInclude Include="Core\Scene.h" />
     <ClInclude Include="TestableClass.h" />
     <ClInclude Include="EntitySystems\RootEntity.h" />
@@ -116,6 +120,12 @@
     <ClInclude Include="Sound\SoundComponent.h" />
     <ClInclude Include="Sound\SoundSystem.h" />
     <ClInclude Include="EntitySystems\InputSystem.h" />
+    <ClInclude Include="EntitySystems\TransformComponent.h" />
+    <ClInclude Include="EntitySystems\Transform.h" />
+    <ClInclude Include="TaskScheduler.h" />
+    <ClInclude Include="CircularBuffer.h" />
+    <ClInclude Include="Task.h" />
+    <ClInclude Include="CollisionTask.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -127,5 +137,10 @@
   <ItemGroup>
     <Media Include="Sound\car_idle.wav" />
     <Media Include="Sound\car_launch-idle_01.wav" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Experimental">
+      <UniqueIdentifier>{c46a4638-d64f-4632-9ced-19008baa041e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>

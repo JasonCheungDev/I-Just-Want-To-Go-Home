@@ -36,7 +36,7 @@ private:
 	void CheckCollisions();
 	void ResolveCollision(Collision* c);
 	void RemoveCollision(shared_ptr<Collider2D> colliderA, shared_ptr<Collider2D> colliderB);
-
+	void DeployCollisionTask();
 	
 };
 

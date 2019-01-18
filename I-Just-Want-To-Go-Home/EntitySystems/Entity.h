@@ -15,6 +15,28 @@
 #include <glm/gtx/matrix_decompose.hpp>
 #include "Component.h"
 
+class Transforms
+{
+public:
+	glm::vec3 getLocalPosition();
+	glm::vec3 getLocalRotoation();
+	glm::vec3 getLocalScale();
+	void setLocalPosition();
+	void setLocalRotation();
+	void setLocalScale();
+
+	glm::mat4 getWorldPosition();
+	glm::mat4 getWorldRotation();
+	glm::mat4 getWorldScale();
+
+private:
+	glm::vec3 localPosition;
+	glm::vec3 localRotation;
+	glm::vec3 localScale = glm::vec3(1.0f);
+	glm::mat4 localTransformation;
+	glm::mat4 worldTransformation;
+};
+
 // TODO: Make everything unique_ptr - Entities own children and own components. 
 class Entity
 {
@@ -106,7 +128,7 @@ public:
 	}
 
 	// Returns a copy of all components attached to this entity. 
-	const std::vector<Component*> getComponents()
+	const std::vector<Component*>& getComponents()
 	{
 		return _componentStorage;
 	}
